@@ -2,7 +2,36 @@ import { Pool, PoolClient } from "pg";
 
 const globalForDb = globalThis as unknown as { primeHubPool?: Pool; schemaReady?: Promise<void> };
 function connectionString(){ const value=process.env.DATABASE_URL; if(!value) throw new Error("DATABASE_URL is not configured"); return value; }
-export const pool = globalForDb.primeHubPool ?? new Pool({ connectionString: connectionString() });
+export const pool = globalForDb.primeHubPool ?? new Pool({ connectionString: connectionString(), ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined });
 if(process.env.NODE_ENV !== "production") globalForDb.primeHubPool = pool;
-async function createSchema(client:PoolClient){ await client.query(`CREATE TABLE IF NOT EXISTS sessions(id UUID PRIMARY KEY,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); CREATE TABLE IF NOT EXISTS conversations(id UUID PRIMARY KEY,session_id UUID NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,status TEXT NOT NULL DEFAULT 'AUTO',created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); CREATE TABLE IF NOT EXISTS messages(id BIGSERIAL PRIMARY KEY,conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,role TEXT NOT NULL CHECK(role IN ('customer','admin','salaar-stub')),body TEXT NOT NULL,created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()); CREATE INDEX IF NOT EXISTS idx_messages_conversation_id_id ON messages(conversation_id,id); CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at DESC);`); }
+async function createSchema(client:PoolClient){
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS sessions(
+      id UUID PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS conversations(
+      id UUID PRIMARY KEY,
+      session_id UUID NOT NULL UNIQUE REFERENCES sessions(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'AUTO',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS messages(
+      id BIGSERIAL PRIMARY KEY,
+      conversation_id UUID NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK(role IN ('customer','admin','salaar-stub')),
+      body TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS shown_product_ids TEXT[] NOT NULL DEFAULT '{}';
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS cart JSONB NOT NULL DEFAULT '[]'::jsonb;
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS hold_until TIMESTAMPTZ;
+    ALTER TABLE conversations ADD COLUMN IF NOT EXISTS hard_mute BOOLEAN NOT NULL DEFAULT FALSE;
+    ALTER TABLE messages ADD COLUMN IF NOT EXISTS meta JSONB NOT NULL DEFAULT '{}'::jsonb;
+    CREATE INDEX IF NOT EXISTS idx_messages_conversation_id_id ON messages(conversation_id,id);
+    CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at DESC);
+  `);
+}
 export async function ensureSchema(){ if(!globalForDb.schemaReady){ globalForDb.schemaReady=(async()=>{const client=await pool.connect();try{await createSchema(client)}finally{client.release()}})().catch(e=>{globalForDb.schemaReady=undefined;throw e}); } await globalForDb.schemaReady; }
