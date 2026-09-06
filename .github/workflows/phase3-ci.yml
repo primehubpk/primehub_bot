@@ -56,14 +56,16 @@ jobs:
           grep -q '"ok":true' /tmp/order.json
           grep -q '"emailConfigured":false' /tmp/order.json
           grep -q 'wa.me/923238878009' /tmp/order.json
-          curl -fsS -c /tmp/admin.cookies -H 'Content-Type: application/json' -d '{"password":"ci-only-password"}' http://127.0.0.1:3000/api/admin/login >/tmp/admin-login.json
-          curl -fsS -b /tmp/admin.cookies http://127.0.0.1:3000/api/admin/conversations >/tmp/conversations.json
+          curl -fsS -D /tmp/admin.headers -H 'Content-Type: application/json' -d '{"password":"ci-only-password"}' http://127.0.0.1:3000/api/admin/login >/tmp/admin-login.json
+          ADMIN_COOKIE=$(grep -i '^set-cookie:' /tmp/admin.headers | head -1 | sed -E 's/^set-cookie: ([^;]+).*/\1/I' | tr -d '\r')
+          test -n "$ADMIN_COOKIE"
+          curl -fsS -H "Cookie: $ADMIN_COOKIE" http://127.0.0.1:3000/api/admin/conversations >/tmp/conversations.json
           grep -q 'New order' /tmp/conversations.json
           node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("/tmp/conversations.json","utf8"));const c=x.conversations.find(v=>v.order_status==="New order");if(!c)process.exit(1);fs.writeFileSync("/tmp/conversation-id",c.id)'
           CID=$(cat /tmp/conversation-id)
-          curl -fsS -b /tmp/admin.cookies -H 'Content-Type: application/json' -d "{\"conversationId\":\"$CID\",\"action\":\"complete\"}" http://127.0.0.1:3000/api/admin/orders >/tmp/complete.json
+          curl -fsS -H "Cookie: $ADMIN_COOKIE" -H 'Content-Type: application/json' -d "{\"conversationId\":\"$CID\",\"action\":\"complete\"}" http://127.0.0.1:3000/api/admin/orders >/tmp/complete.json
           grep -q '"status":"Complete"' /tmp/complete.json
-          curl -fsS -b /tmp/admin.cookies http://127.0.0.1:3000/api/admin/conversations >/tmp/conversations2.json
+          curl -fsS -H "Cookie: $ADMIN_COOKIE" http://127.0.0.1:3000/api/admin/conversations >/tmp/conversations2.json
           grep -q 'Complete' /tmp/conversations2.json
       - name: Stop app
         if: always()
