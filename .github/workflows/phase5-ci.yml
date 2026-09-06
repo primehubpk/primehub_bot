@@ -1,0 +1,68 @@
+name: Phase 5 CI
+
+on:
+  push:
+    branches: [phase-5-embed-vps]
+  pull_request:
+    branches: [phase-4-knowledge-reseller-need-you, main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: primehub_bot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d primehub_bot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/primehub_bot
+      DATABASE_SSL: "false"
+      ADMIN_PASSWORD: ci-only-password
+      NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+      ALLOWED_WEBSITE_ORIGINS: http://localhost:3001,https://www.primehubmall.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate lockfile for npm ci
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Start built app
+        run: |
+          npm start > /tmp/primehub-bot.log 2>&1 &
+          echo $! > /tmp/primehub-bot.pid
+          for i in {1..30}; do curl -fsS http://127.0.0.1:3000/embed >/dev/null && exit 0; sleep 1; done
+          cat /tmp/primehub-bot.log
+          exit 1
+      - name: Smoke test embed, CORS and Ready flow
+        run: |
+          set -e
+          curl -fsS -D /tmp/embed.headers http://127.0.0.1:3000/embed -o /tmp/embed.html
+          grep -qi frame-ancestors /tmp/embed.headers
+          grep -q 'Need help' /tmp/embed.html
+          curl -fsS -D /tmp/cors.headers -H 'Origin: http://localhost:3001' http://127.0.0.1:3000/api/chat -o /tmp/chat.json
+          grep -qi 'access-control-allow-origin: http://localhost:3001' /tmp/cors.headers
+          curl -fsS -c /tmp/customer.cookies http://127.0.0.1:3000/api/chat -o /tmp/chat2.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"body":"hello from embedded website"}' http://127.0.0.1:3000/api/chat -o /tmp/message.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"productId":"BNG-101"}' http://127.0.0.1:3000/api/cart -o /tmp/cart1.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"productId":"WAT-201"}' http://127.0.0.1:3000/api/cart -o /tmp/cart2.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"fullName":"CI Customer","phone":"03231234567","city":"Lahore","address":"House 1 Street 2 Lahore","notes":"Phase 5 regression"}' http://127.0.0.1:3000/api/order/ready -o /tmp/order.json
+          grep -q '"ok":true' /tmp/order.json
+          grep -q 'wa.me/923238878009' /tmp/order.json
+      - name: Stop app
+        if: always()
+        run: kill "$(cat /tmp/primehub-bot.pid 2>/dev/null)" 2>/dev/null || true
