@@ -3,7 +3,8 @@ import { Pool, PoolClient } from "pg";
 const globalForDb = globalThis as unknown as { primeHubPool?: Pool; schemaReady?: Promise<void> };
 function connectionString(){ const value=process.env.DATABASE_URL; if(!value) throw new Error("DATABASE_URL is not configured"); return value; }
 function sslConfig(){if(process.env.DATABASE_SSL==="false")return undefined;if(process.env.DATABASE_SSL==="true")return{rejectUnauthorized:false};return process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined;}
-export const pool = globalForDb.primeHubPool ?? new Pool({ connectionString: connectionString(), ssl: sslConfig() });
+function poolConfig(){const value=process.env.DATABASE_URL;return value?{connectionString:value,ssl:sslConfig()}:{};}
+export const pool = globalForDb.primeHubPool ?? new Pool(poolConfig());
 if(process.env.NODE_ENV !== "production") globalForDb.primeHubPool = pool;
 async function createSchema(client:PoolClient){
   await client.query(`
@@ -27,4 +28,4 @@ async function createSchema(client:PoolClient){
     CREATE INDEX IF NOT EXISTS idx_reseller_status_created ON reseller_requests(status,created_at DESC);
   `);
 }
-export async function ensureSchema(){ if(!globalForDb.schemaReady){ globalForDb.schemaReady=(async()=>{const client=await pool.connect();try{await createSchema(client)}finally{client.release()}})().catch(e=>{globalForDb.schemaReady=undefined;throw e}); } await globalForDb.schemaReady; }
+export async function ensureSchema(){ connectionString(); if(!globalForDb.schemaReady){ globalForDb.schemaReady=(async()=>{const client=await pool.connect();try{await createSchema(client)}finally{client.release()}})().catch(e=>{globalForDb.schemaReady=undefined;throw e}); } await globalForDb.schemaReady; }
