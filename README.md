@@ -1,20 +1,21 @@
-# PrimeHub Bot — Phase 1
+# PrimeHub Bot — Phase 2
 
-Phase 1 adds a standalone PrimeHubMaal customer chat shell and human admin inbox inside `primehubpk/primehub_bot` only.
+This repository is the standalone `primehubpk/primehub_bot` app. Phase 2 builds on the Phase 1 chat shell and admin inbox. The PrimeHub website repository is not cloned, edited, or deployed here.
 
-## Included
-- Bottom-right `Need help?` widget with Salaar placeholder avatar.
-- Header: `Salaar · PrimeHubMaal`.
-- Guest messages persisted in PostgreSQL using a long-lived HTTP-only session cookie.
-- Stub reply after customer messages.
-- `/admin` password login using `ADMIN_PASSWORD`.
-- `Admin — Salaar inbox` sidebar/thread UI with manual admin replies.
-- Customer/admin polling every 2 seconds.
-- Responsive layout for mobile.
-- Conversation `status` defaults to `AUTO` for a later phase.
+## Phase 2 included
+- Salaar salesman replies through OpenAI or Anthropic environment keys.
+- Friendly in-chat configuration error when no LLM key is set; the app does not crash.
+- Replaceable mock catalog tool with bangles and watches, photos, retail/wholesale prices, and sizes.
+- Product cards with `Add to cart` and a per-session cart summary.
+- `shown_product_ids` anti-repeat tracking per conversation.
+- Admin reply = one-hour SOFT HOLD; each admin reply resets the timer.
+- Admin `Salaar wait` = HARD MUTE and `Continue Salaar` = AUTO.
+- AUTO / WAIT badges in the admin inbox.
+- Confused/low-confidence fallback points customers to WhatsApp text at `03238878009` without a WhatsApp API integration.
+- 2-second polling from Phase 1 remains in place.
 
-## Out of scope for Phase 1
-No LLM, product catalog, cart, Rs 300 logic, Ready button, email, `wa.me`, WhatsApp Cloud API, Prime Skill, Reseller Club, or PrimeHub website deployment/editing.
+## Out of scope
+No Ready button, Rs 300 flow, ops email, `wa.me` order link, Reseller Club signup, Prime Skill crawl, WhatsApp Cloud API, or PrimeHub website deployment.
 
 ## Environment
 Copy `.env.example` to `.env.local` and set:
@@ -23,12 +24,21 @@ Copy `.env.example` to `.env.local` and set:
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
 ADMIN_PASSWORD=choose-a-strong-password
 NEXT_PUBLIC_APP_URL=http://localhost:3000
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
+ANTHROPIC_API_KEY=
+ANTHROPIC_MODEL=claude-3-5-haiku-latest
 ```
 
+Configure either OpenAI or Anthropic. If both keys are blank, the public chat remains usable and shows a friendly Salaar configuration message.
+
 ## Run locally
+
 ```bash
 npm install
+npm run lint
 npm run typecheck
+npm test
 npm run build
 npm run dev
 ```
@@ -36,10 +46,8 @@ npm run dev
 Public page: `http://localhost:3000`
 Admin inbox: `http://localhost:3000/admin`
 
-The app creates the Phase 1 tables automatically on the first chat/admin API request. `db/schema.sql` is also included.
-
 ## Railway / VPS
-Attach PostgreSQL, set `DATABASE_URL`, `ADMIN_PASSWORD`, and `NEXT_PUBLIC_APP_URL`, then run:
+Attach PostgreSQL, set the environment variables above, then run:
 
 ```bash
 npm install
@@ -47,11 +55,20 @@ npm run build
 npm start
 ```
 
-## Phase 1 success check
-1. Send two public messages and refresh; both remain.
-2. Login to `/admin`, open the conversation, reply as admin.
-3. Customer sees the admin reply without refreshing, within about 2 seconds.
-4. Widget and admin inbox remain usable on mobile width.
+## CI
+`.github/workflows/phase2-ci.yml` runs on Phase 2 pushes and PRs and executes dependency install, `npm ci`, lint, TypeScript checking, unit tests, and the production Next.js build.
 
-## Repository isolation
-The existing Python bot code remains in this repository and is not replaced by the Phase 1 web shell. The PrimeHub website repository is not cloned, edited, or deployed in Phase 1. Website embedding is reserved for Phase 5.
+## Phase 2 verify
+- [ ] Preview URL opens the customer widget and `/admin` inbox.
+- [ ] Widget: ask for bangles → 2–3 catalog products appear with images and `Add to cart`.
+- [ ] Add one product → cart summary updates.
+- [ ] Ask for bangles again → previously shown SKUs are not repeated.
+- [ ] Ask `kuch aur` → Salaar can rotate to a new set.
+- [ ] `/admin`: send a human reply → badge becomes WAIT and Salaar stays silent.
+- [ ] Click `Continue Salaar` → badge becomes AUTO and Salaar can answer again.
+- [ ] Click `Salaar wait` → hard mute remains WAIT until manually continued.
+- [ ] Remove/omit LLM keys → app still loads and chat shows a friendly configuration error.
+- [ ] GitHub Phase 2 CI is green, including lint, typecheck, tests, and `npm run build`.
+
+## Preview URL
+Pending a standalone `primehub_bot` Railway/Vercel environment with PostgreSQL. Do not point this repo at the existing PrimeHub website Vercel project.
