@@ -1,0 +1,4 @@
+import {NextRequest,NextResponse} from "next/server";
+import {isAdmin} from "@/lib/adminAuth";
+import {ensureSchema,pool} from "@/lib/db";
+export async function POST(request:NextRequest){if(!isAdmin(request))return NextResponse.json({error:"Unauthorized"},{status:401});await ensureSchema();const payload=await request.json().catch(()=>({}));const id=typeof payload?.conversationId==="string"?payload.conversationId:"";const action=payload?.action;if(!id||!["wait","continue"].includes(action))return NextResponse.json({error:"Invalid control"},{status:400});if(action==="wait")await pool.query("UPDATE conversations SET status='WAIT',hard_mute=TRUE,hold_until=NULL,updated_at=NOW() WHERE id=$1",[id]);else await pool.query("UPDATE conversations SET status='AUTO',hard_mute=FALSE,hold_until=NULL,updated_at=NOW() WHERE id=$1",[id]);return NextResponse.json({ok:true,status:action==="wait"?"WAIT":"AUTO"});}
