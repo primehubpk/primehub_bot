@@ -1,0 +1,4 @@
+import {NextRequest,NextResponse} from "next/server";
+import {isAdmin} from "@/lib/adminAuth";
+import {ensureSchema,pool} from "@/lib/db";
+export async function POST(request:NextRequest){if(!isAdmin(request))return NextResponse.json({error:"Unauthorized"},{status:401});await ensureSchema();const payload=await request.json().catch(()=>({}));const conversationId=typeof payload?.conversationId==="string"?payload.conversationId:"";const action=payload?.action;if(!conversationId||action!=="complete")return NextResponse.json({error:"Invalid action"},{status:400});const order=(await pool.query("SELECT id,status FROM orders WHERE conversation_id=$1 ORDER BY created_at DESC LIMIT 1",[conversationId])).rows[0];if(!order)return NextResponse.json({error:"Order not found"},{status:404});await pool.query("UPDATE orders SET status='Complete',completed_at=NOW() WHERE id=$1",[order.id]);return NextResponse.json({ok:true,status:"Complete",orderId:order.id});}

@@ -1,0 +1,4 @@
+import { NextRequest, NextResponse } from "next/server";
+import { ADMIN_COOKIE, adminToken } from "@/lib/adminAuth";
+export async function POST(request:NextRequest){const payload=await request.json().catch(()=>({}));const expected=process.env.ADMIN_PASSWORD;if(!expected)return NextResponse.json({error:"ADMIN_PASSWORD is not configured"},{status:500});if(payload?.password!==expected)return NextResponse.json({error:"Invalid password"},{status:401});const response=NextResponse.json({ok:true});response.cookies.set(ADMIN_COOKIE,adminToken(),{httpOnly:true,sameSite:"strict",secure:process.env.NODE_ENV==="production",path:"/",maxAge:43200});return response;}
+export async function DELETE(){const response=NextResponse.json({ok:true});response.cookies.set(ADMIN_COOKIE,"",{path:"/",maxAge:0});return response;}

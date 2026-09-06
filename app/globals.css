@@ -1,0 +1,5 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+body{margin:0;background:#f5f7fb;color:#111827;font-family:Arial,Helvetica,sans-serif}*{box-sizing:border-box}
+body:has(.salaar-embed-page){background:transparent}
