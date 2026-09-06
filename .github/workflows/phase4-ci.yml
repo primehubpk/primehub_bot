@@ -1,0 +1,81 @@
+name: Phase 4 CI
+
+on:
+  push:
+    branches: [phase-4-knowledge-reseller-need-you]
+  pull_request:
+    branches: [phase-3-ready-order, main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: primehub_bot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d primehub_bot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/primehub_bot
+      DATABASE_SSL: "false"
+      ADMIN_PASSWORD: ci-only-password
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate lockfile for npm ci
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Start built app
+        run: |
+          npm start > /tmp/primehub-bot.log 2>&1 &
+          echo $! > /tmp/primehub-bot.pid
+          for i in {1..30}; do curl -fsS http://127.0.0.1:3000 >/dev/null && exit 0; sleep 1; done
+          cat /tmp/primehub-bot.log
+          exit 1
+      - name: Smoke test Phase 4 plus Phase 3 regression
+        run: |
+          set -euo pipefail
+          curl -fsS -c /tmp/customer.cookies http://127.0.0.1:3000/api/chat >/tmp/chat.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"body":"Prime Skill kya hai?"}' http://127.0.0.1:3000/api/chat >/tmp/skill-post.json
+          curl -fsS -b /tmp/customer.cookies http://127.0.0.1:3000/api/chat >/tmp/skill.json
+          grep -q 'Prime Skill' /tmp/skill.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"body":"reseller pe signup kar do"}' http://127.0.0.1:3000/api/chat >/tmp/reseller-start.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"body":"CI Reseller | ci@example.com | 03231234567"}' http://127.0.0.1:3000/api/chat >/tmp/reseller-details.json
+          curl -fsS -D /tmp/admin.headers -H 'Content-Type: application/json' -d '{"password":"ci-only-password"}' http://127.0.0.1:3000/api/admin/login >/tmp/admin-login.json
+          ADMIN_COOKIE=$(grep -i '^set-cookie:' /tmp/admin.headers | head -1 | sed -E 's/^set-cookie: ([^;]+).*/\1/I' | tr -d '\r')
+          test -n "$ADMIN_COOKIE"
+          curl -fsS -H "Cookie: $ADMIN_COOKIE" http://127.0.0.1:3000/api/admin/resellers >/tmp/resellers.json
+          grep -q 'Pending reseller' /tmp/resellers.json
+          node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("/tmp/resellers.json","utf8"));const r=x.requests.find(v=>v.status==="Pending reseller");if(!r)process.exit(1);fs.writeFileSync("/tmp/reseller-id",r.id)'
+          RID=$(cat /tmp/reseller-id)
+          curl -fsS -H "Cookie: $ADMIN_COOKIE" -H 'Content-Type: application/json' -d "{\"id\":\"$RID\"}" http://127.0.0.1:3000/api/admin/resellers >/tmp/approved.json
+          grep -q '"status":"Approved"' /tmp/approved.json
+          grep -q '"emailConfigured":false' /tmp/approved.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"body":"samajh nahi aya payment"}' http://127.0.0.1:3000/api/chat >/tmp/needyou-post.json
+          curl -fsS -b /tmp/customer.cookies http://127.0.0.1:3000/api/chat >/tmp/needyou.json
+          grep -q '03238878009' /tmp/needyou.json
+          curl -fsS -H "Cookie: $ADMIN_COOKIE" http://127.0.0.1:3000/api/admin/conversations >/tmp/conversations.json
+          grep -q '"need_you":true' /tmp/conversations.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"productId":"BNG-101"}' http://127.0.0.1:3000/api/cart >/tmp/cart1.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"productId":"WAT-201"}' http://127.0.0.1:3000/api/cart >/tmp/cart2.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"fullName":"CI Customer","phone":"03231234567","city":"Lahore","address":"House 1 Street 2 Lahore","notes":"Phase 4 regression"}' http://127.0.0.1:3000/api/order/ready >/tmp/order.json
+          grep -q '"ok":true' /tmp/order.json
+          grep -q 'wa.me/923238878009' /tmp/order.json
+      - name: Stop app
+        if: always()
+        run: kill "$(cat /tmp/primehub-bot.pid 2>/dev/null)" 2>/dev/null || true
