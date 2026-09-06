@@ -1,0 +1,27 @@
+name: Phase 3 CI
+
+on:
+  push:
+    branches: [phase-3-ready-order]
+  pull_request:
+    branches: [phase-2-salaar, main]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/primehub_bot
+      ADMIN_PASSWORD: ci-only-password
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate lockfile for npm ci
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
