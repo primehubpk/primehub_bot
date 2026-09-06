@@ -2,7 +2,8 @@ import { Pool, PoolClient } from "pg";
 
 const globalForDb = globalThis as unknown as { primeHubPool?: Pool; schemaReady?: Promise<void> };
 function connectionString(){ const value=process.env.DATABASE_URL; if(!value) throw new Error("DATABASE_URL is not configured"); return value; }
-export const pool = globalForDb.primeHubPool ?? new Pool({ connectionString: connectionString(), ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined });
+function sslConfig(){if(process.env.DATABASE_SSL==="false")return undefined;if(process.env.DATABASE_SSL==="true")return{rejectUnauthorized:false};return process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : undefined;}
+export const pool = globalForDb.primeHubPool ?? new Pool({ connectionString: connectionString(), ssl: sslConfig() });
 if(process.env.NODE_ENV !== "production") globalForDb.primeHubPool = pool;
 async function createSchema(client:PoolClient){
   await client.query(`
