@@ -9,6 +9,20 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: primehub_bot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres -d primehub_bot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/primehub_bot
       ADMIN_PASSWORD: ci-only-password
@@ -25,3 +39,32 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: Start built app
+        run: |
+          npm start > /tmp/primehub-bot.log 2>&1 &
+          echo $! > /tmp/primehub-bot.pid
+          for i in {1..30}; do curl -fsS http://127.0.0.1:3000 >/dev/null && exit 0; sleep 1; done
+          cat /tmp/primehub-bot.log
+          exit 1
+      - name: Smoke test Ready order lifecycle
+        run: |
+          set -euo pipefail
+          curl -fsS -c /tmp/customer.cookies http://127.0.0.1:3000/api/chat >/tmp/chat.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"productId":"BNG-101"}' http://127.0.0.1:3000/api/cart >/tmp/cart1.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"productId":"WAT-201"}' http://127.0.0.1:3000/api/cart >/tmp/cart2.json
+          curl -fsS -b /tmp/customer.cookies -H 'Content-Type: application/json' -d '{"fullName":"CI Customer","phone":"03231234567","city":"Lahore","address":"House 1 Street 2 Lahore","notes":"Phase 3 smoke"}' http://127.0.0.1:3000/api/order/ready >/tmp/order.json
+          grep -q '"ok":true' /tmp/order.json
+          grep -q '"emailConfigured":false' /tmp/order.json
+          grep -q 'wa.me/923238878009' /tmp/order.json
+          curl -fsS -c /tmp/admin.cookies -H 'Content-Type: application/json' -d '{"password":"ci-only-password"}' http://127.0.0.1:3000/api/admin/login >/tmp/admin-login.json
+          curl -fsS -b /tmp/admin.cookies http://127.0.0.1:3000/api/admin/conversations >/tmp/conversations.json
+          grep -q 'New order' /tmp/conversations.json
+          node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("/tmp/conversations.json","utf8"));const c=x.conversations.find(v=>v.order_status==="New order");if(!c)process.exit(1);fs.writeFileSync("/tmp/conversation-id",c.id)'
+          CID=$(cat /tmp/conversation-id)
+          curl -fsS -b /tmp/admin.cookies -H 'Content-Type: application/json' -d "{\"conversationId\":\"$CID\",\"action\":\"complete\"}" http://127.0.0.1:3000/api/admin/orders >/tmp/complete.json
+          grep -q '"status":"Complete"' /tmp/complete.json
+          curl -fsS -b /tmp/admin.cookies http://127.0.0.1:3000/api/admin/conversations >/tmp/conversations2.json
+          grep -q 'Complete' /tmp/conversations2.json
+      - name: Stop app
+        if: always()
+        run: kill "$(cat /tmp/primehub-bot.pid 2>/dev/null)" 2>/dev/null || true
