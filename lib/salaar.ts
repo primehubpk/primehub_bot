@@ -8,46 +8,58 @@ export const WHATSAPP_FALLBACK =
 
 const defaultReply = "Ji, batayein kis cheez mein help chahiye?";
 
-async function tryOpenAi(key: string, system: string, customerMessage: string, productText: string) {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+function promptText(customerMessage: string, productText: string) {
+  return `Customer: ${customerMessage}\nCatalog tool results:\n${productText}`;
+}
+
+async function tryOpenAiCompatible(
+  endpoint: string,
+  key: string,
+  model: string,
+  system: string,
+  customerMessage: string,
+  productText: string,
+  extraHeaders: Record<string, string> = {},
+) {
+  const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+      ...extraHeaders,
+    },
     body: JSON.stringify({
-      model: process.env.OPENAI_MODEL || "gpt-4.1-mini",
+      model,
       temperature: 0.4,
       max_tokens: 180,
       messages: [
         { role: "system", content: system },
-        { role: "user", content: `Customer: ${customerMessage}\nCatalog tool results:\n${productText}` },
+        { role: "user", content: promptText(customerMessage, productText) },
       ],
     }),
   });
-  if (!response.ok) throw new Error(`OpenAI ${response.status}`);
+  if (!response.ok) throw new Error(`${endpoint} ${response.status}`);
   const data = await response.json();
   return (data?.choices?.[0]?.message?.content || defaultReply).trim();
 }
 
-async function tryAnthropic(key: string, system: string, customerMessage: string, productText: string) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": key,
-      "anthropic-version": "2023-06-01",
+async function tryGemini(key: string, system: string, customerMessage: string, productText: string) {
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts: [{ text: promptText(customerMessage, productText) }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 180 },
+      }),
     },
-    body: JSON.stringify({
-      model: process.env.ANTHROPIC_MODEL || "claude-3-5-haiku-latest",
-      max_tokens: 180,
-      temperature: 0.4,
-      system,
-      messages: [
-        { role: "user", content: `Customer: ${customerMessage}\nCatalog tool results:\n${productText}` },
-      ],
-    }),
-  });
-  if (!response.ok) throw new Error(`Anthropic ${response.status}`);
+  );
+  if (!response.ok) throw new Error(`Gemini ${response.status}`);
   const data = await response.json();
-  return (data?.content?.[0]?.text || defaultReply).trim();
+  return (data?.candidates?.[0]?.content?.parts?.[0]?.text || defaultReply).trim();
 }
 
 export async function generateSalaarReply(customerMessage: string, products: Product[], adminNotes = "") {
@@ -68,19 +80,51 @@ export async function generateSalaarReply(customerMessage: string, products: Pro
 
   const errors: string[] = [];
 
-  for (const key of rotatedKeys("openai")) {
+  for (const key of rotatedKeys("groq")) {
     try {
-      return { text: await tryOpenAi(key, system, customerMessage, productText), configured: true };
+      return {
+        text: await tryOpenAiCompatible(
+          "https://api.groq.com/openai/v1/chat/completions",
+          key,
+          process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+          system,
+          customerMessage,
+          productText,
+        ),
+        configured: true,
+      };
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : "OpenAI error");
+      errors.push(error instanceof Error ? error.message : "Groq error");
     }
   }
 
-  for (const key of rotatedKeys("anthropic")) {
+  for (const key of rotatedKeys("openrouter")) {
     try {
-      return { text: await tryAnthropic(key, system, customerMessage, productText), configured: true };
+      const headers: Record<string, string> = {};
+      if (process.env.NEXT_PUBLIC_APP_URL) headers["HTTP-Referer"] = process.env.NEXT_PUBLIC_APP_URL;
+      headers["X-Title"] = "PrimeHubMaal Salaar";
+      return {
+        text: await tryOpenAiCompatible(
+          "https://openrouter.ai/api/v1/chat/completions",
+          key,
+          process.env.OPENROUTER_MODEL || "google/gemini-2.5-flash",
+          system,
+          customerMessage,
+          productText,
+          headers,
+        ),
+        configured: true,
+      };
     } catch (error) {
-      errors.push(error instanceof Error ? error.message : "Anthropic error");
+      errors.push(error instanceof Error ? error.message : "OpenRouter error");
+    }
+  }
+
+  for (const key of rotatedKeys("gemini")) {
+    try {
+      return { text: await tryGemini(key, system, customerMessage, productText), configured: true };
+    } catch (error) {
+      errors.push(error instanceof Error ? error.message : "Gemini error");
     }
   }
 
