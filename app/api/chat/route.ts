@@ -26,10 +26,7 @@ export async function POST(request:NextRequest){try{const payload=await request.
  const waiting=c?.status==="WAIT"&&(c.hard_mute||!c.hold_until||new Date(c.hold_until)>new Date());
  if(!waiting){
    if(c?.status==="WAIT")await pool.query("UPDATE conversations SET status='AUTO',hold_until=NULL WHERE id=$1",[conversationId]);
-   const asksForNew=/kuch aur|aur dikhao|more|another|different/i.test(body);
-   if(asksForNew)await pool.query("UPDATE conversations SET shown_product_ids='{}'::text[] WHERE id=$1",[conversationId]);
-   const shown=asksForNew?[]:(c?.shown_product_ids||[]);
-   const products=searchCatalog(body,shown,3);
+   const products=searchCatalog(body,c?.shown_product_ids||[],3);
    const reply=await generateSalaarReply(body,products);
    await pool.query("INSERT INTO messages(conversation_id,role,body,meta) VALUES($1,'salaar-stub',$2,$3::jsonb)",[conversationId,reply.text,JSON.stringify({products})]);
    if(products.length)await pool.query("UPDATE conversations SET shown_product_ids=array_cat(shown_product_ids,$2::text[]),updated_at=NOW() WHERE id=$1",[conversationId,products.map(p=>p.id)]);
