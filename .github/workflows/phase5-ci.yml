@@ -2,9 +2,9 @@ name: Phase 5 CI
 
 on:
   push:
-    branches: [phase-5-embed-vps]
+    branches: [phase-5-embed-vps, activate-public-bot]
   pull_request:
-    branches: [phase-4-knowledge-reseller-need-you, main]
+    branches: [phase-5-embed-vps, phase-4-knowledge-reseller-need-you, main]
 
 jobs:
   verify:
